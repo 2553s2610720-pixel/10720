@@ -1,60 +1,73 @@
-import random
-import streamlit as st  # 오타 수정 완료!
+import streamlit as st
+import google.generativeai as genai
 
-# 1. 에러 방지용 기본 음식 데이터 정의
-FOOD_DATA = {
-    "한식": {
-        "매운맛": ["떡볶이", "닭발", "김치찌개", "매운 갈비찜"],
-        "담백/깔끔": ["비빔밥", "설렁탕", "삼계탕", "샤브샤브"],
-        "달콤/짭조름": ["불고기", "갈비찜", "간장게장", "뚝배기 불고기"],
-    },
-    "일식": {
-        "매운맛": ["탄탄멘", "매운 돈코츠 라멘", "카레 (매운맛)"],
-        "담백/깔끔": ["초밥", "우동", "소바", "돈카츠"],
-        "달콤/짭조름": ["규동", "가츠동", "장어덮밥", "야키토리"],
-    },
-    "중식": {
-        "매운맛": ["마라탕", "마라샹궈", "짬뽕", "사천탕수육"],
-        "담백/깔끔": ["울면", "백짬뽕", "딤섬"],
-        "달콤/짭조름": ["짜장면", "탕수육", "꿔바로우", "동파육"],
-    },
-    "양식/기타": {
-        "매운맛": ["아라비아따 파스타", "페페로니 피자", "타코"],
-        "담백/깔끔": ["알리오 올리오", "리코타 치즈 샐러드", "샌드위치"],
-        "달콤/짭조름": ["고르곤졸라 피자", "바베큐 폭립", "스테이크"],
-    },
-}
+# 1. 페이지 설정 및 제목
+st.set_page_config(page_title="맛있는 음식 추천 챗봇", page_icon="🍔", layout="centered")
+st.title("🍔 오늘 뭐 먹지? 맛있는 음식 고르기!")
+st.write("결정 장애가 오셨나요? 무엇이 먹고 싶은지, 혹은 지금 기분이 어떤지 말씀해주시면 딱 맞는 음식을 추천해 드려요!")
 
-# 2. 웹앱 UI 설정
-st.set_page_config(page_title="취향 저격 음식 추천", page_icon="🍔", layout="centered")
+# 2. Streamlit Secrets에서 API 키 불러오기 및 설정
+try:
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=GOOGLE_API_KEY)
+except KeyError:
+    st.error("🚨 Streamlit Secrets에 'GOOGLE_API_KEY'가 설정되지 않았습니다. 대시보드 설정을 확인해주세요.")
+    st.stop()
 
-st.title("🍳 오늘 뭐 먹지? 취향 저격 추천!")
-st.subheader("당신의 오늘 기분과 취향에 딱 맞는 음식을 추천해 드립니다.")
-st.write("---")
+# 3. 세션 상태(Session State)를 이용한 채팅 기록 초기화
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": "안녕하세요! 오늘의 메뉴 선택을 도와드릴 푸드 가이드입니다. 탕수육 찍먹/부먹 같은 취향부터, 매콤한 게 당긴다거나 하는 현재 기분까지 편하게 말씀해주세요! 🍕✨"
+        }
+    ]
 
-# 3. 사이드바 사용자 입력 받기
-st.sidebar.header("🎯 당신의 취향을 골라보세요")
+# 4. 기존 채팅 기록 화면에 표시
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
 
-# 음식 종류 선택
-cuisine_options = list(FOOD_DATA.keys())
-selected_cuisine = st.sidebar.selectbox("1. 어떤 종류의 음식을 원하시나요?", cuisine_options)
+# 5. 사용자 입력 받기
+if user_input := st.chat_input("예: 매콤하고 면 종류인 음식 추천해줘!"):
+    
+    # 사용자 메시지 화면에 표시 및 기록 저장
+    with st.chat_message("user"):
+        st.write(user_input)
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
-# 맛 선택
-flavor_options = list(FOOD_DATA[selected_cuisine].keys())
-selected_flavor = st.sidebar.selectbox("2. 지금 당기는 맛은?", flavor_options)
-
-# 4. 추천 결과 출력 공간
-st.markdown(f"### 📍 현재 선택: **{selected_cuisine}** > **{selected_flavor}**")
-
-# 추천 버튼 클릭 이벤트
-if st.button("🔥 음식 추천받기", use_container_width=True):
-    # 안전하게 데이터 가져오기
-    food_list = FOOD_DATA[selected_cuisine][selected_flavor]
-    recommended_food = random.choice(food_list)
-
-    # 화면에 효과와 함께 출력
-    st.balloons()  # 폭죽 효과
-    st.success(f"🎉 오늘 추천하는 메뉴는 바로 **[{recommended_food}]** 입니다!")
-    st.info(f"💡 {selected_cuisine} 중에서 {selected_flavor}한 음식을 찾는 당신에게 딱 맞을 거예요!")
-else:
-    st.write("왼쪽 사이드바에서 취향을 고른 후, 위의 **[음식 추천받기]** 버튼을 눌러보세요!")
+    # 6. Gemini API 호출 및 답변 생성 (오류 처리 포함)
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        
+        try:
+            # 모델 설정 (요청하신 gemini-2.5-flash-lite 사용)
+            # 음식 추천에 집중할 수 있도록 시스템 지침(System Instruction) 부여
+            model = genai.GenerativeModel(
+                model_name="gemini-2.5-flash-lite",
+                system_instruction="당신은 세상의 모든 맛있는 음식을 꿰고 있는 친절하고 유쾌한 음식 추천 전문가입니다. 사용자의 취향, 기분, 날씨 등에 맞춰 침이 고이는 맛있는 음식을 추천하고 그 이유를 설명해주세요."
+            )
+            
+            # 대화 맥락 유지를 위해 기존 기록을 Gemini 형식으로 변환하여 전달
+            # 단, Gemini API는 user/model 역할을 사용하므로 assistant를 model로 변환
+            chat_history = []
+            for msg in st.session_state.messages[:-1]: # 방금 넣은 user_input 제외한 이전 기록
+                role = "model" if msg["role"] == "assistant" else "user"
+                chat_history.append({"role": role, "parts": [msg["content"]]})
+            
+            # 대화 시작
+            chat = model.start_chat(history=chat_history)
+            
+            # 스트리밍이 아닌 일반 답변 생성 (lite 모델의 빠른 응답 속도 활용)
+            with st.spinner("음식 고르는 중... ⏳"):
+                response = chat.send_message(user_input)
+            
+            # 답변 출력 및 저장
+            ai_response = response.text
+            message_placeholder.write(ai_response)
+            st.session_state.messages.append({"role": "assistant", "content": ai_response})
+            
+        except Exception as e:
+            # API 키 오류, 네트워크 오류 등 예외 처리
+            error_msg = f"죄송합니다. 답변을 생성하는 중에 오류가 발생했습니다. 😢 (오류 내용: {str(e)})"
+            message_placeholder.error(error_msg)
