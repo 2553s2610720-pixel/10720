@@ -1,73 +1,149 @@
 import streamlit as st
-import google.generativeai as genai
+import pandas as pd
 
-# 1. 페이지 설정 및 제목
-st.set_page_config(page_title="맛있는 음식 추천 챗봇", page_icon="🍔", layout="centered")
-st.title("🍔 오늘 뭐 먹지? 맛있는 음식 고르기!")
-st.write("결정 장애가 오셨나요? 무엇이 먹고 싶은지, 혹은 지금 기분이 어떤지 말씀해주시면 딱 맞는 음식을 추천해 드려요!")
+st.set_page_config(
+    page_title="아침 조례 출결 확인",
+    page_icon="📋",
+    layout="wide"
+)
 
-# 2. Streamlit Secrets에서 API 키 불러오기 및 설정
-try:
-    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-    genai.configure(api_key=GOOGLE_API_KEY)
-except KeyError:
-    st.error("🚨 Streamlit Secrets에 'GOOGLE_API_KEY'가 설정되지 않았습니다. 대시보드 설정을 확인해주세요.")
-    st.stop()
+# ---------------------------
+# 초기 데이터
+# ---------------------------
+STUDENTS = [
+    "김민준",
+    "이서준",
+    "박도윤",
+    "최예은",
+    "정하린",
+    "윤지우",
+    "강시우",
+    "한지민",
+    "오수빈",
+    "신현우"
+]
 
-# 3. 세션 상태(Session State)를 이용한 채팅 기록 초기화
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": "안녕하세요! 오늘의 메뉴 선택을 도와드릴 푸드 가이드입니다. 탕수육 찍먹/부먹 같은 취향부터, 매콤한 게 당긴다거나 하는 현재 기분까지 편하게 말씀해주세요! 🍕✨"
-        }
-    ]
+if "attendance" not in st.session_state:
+    st.session_state.attendance = {
+        student: "출석"
+        for student in STUDENTS
+    }
 
-# 4. 기존 채팅 기록 화면에 표시
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+# ---------------------------
+# 제목
+# ---------------------------
+st.title("📋 아침 조례 출결 확인 시스템")
+st.caption("담임교사용 간단 출결 관리 앱")
 
-# 5. 사용자 입력 받기
-if user_input := st.chat_input("예: 매콤하고 면 종류인 음식 추천해줘!"):
-    
-    # 사용자 메시지 화면에 표시 및 기록 저장
-    with st.chat_message("user"):
-        st.write(user_input)
-    st.session_state.messages.append({"role": "user", "content": user_input})
+# ---------------------------
+# 출결 입력
+# ---------------------------
+st.subheader("✏️ 출결 입력 및 수정")
 
-    # 6. Gemini API 호출 및 답변 생성 (오류 처리 포함)
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        
-        try:
-            # 모델 설정 (요청하신 gemini-2.5-flash-lite 사용)
-            # 음식 추천에 집중할 수 있도록 시스템 지침(System Instruction) 부여
-            model = genai.GenerativeModel(
-                model_name="gemini-2.5-flash-lite",
-                system_instruction="당신은 세상의 모든 맛있는 음식을 꿰고 있는 친절하고 유쾌한 음식 추천 전문가입니다. 사용자의 취향, 기분, 날씨 등에 맞춰 침이 고이는 맛있는 음식을 추천하고 그 이유를 설명해주세요."
-            )
-            
-            # 대화 맥락 유지를 위해 기존 기록을 Gemini 형식으로 변환하여 전달
-            # 단, Gemini API는 user/model 역할을 사용하므로 assistant를 model로 변환
-            chat_history = []
-            for msg in st.session_state.messages[:-1]: # 방금 넣은 user_input 제외한 이전 기록
-                role = "model" if msg["role"] == "assistant" else "user"
-                chat_history.append({"role": role, "parts": [msg["content"]]})
-            
-            # 대화 시작
-            chat = model.start_chat(history=chat_history)
-            
-            # 스트리밍이 아닌 일반 답변 생성 (lite 모델의 빠른 응답 속도 활용)
-            with st.spinner("음식 고르는 중... ⏳"):
-                response = chat.send_message(user_input)
-            
-            # 답변 출력 및 저장
-            ai_response = response.text
-            message_placeholder.write(ai_response)
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
-            
-        except Exception as e:
-            # API 키 오류, 네트워크 오류 등 예외 처리
-            error_msg = f"죄송합니다. 답변을 생성하는 중에 오류가 발생했습니다. 😢 (오류 내용: {str(e)})"
-            message_placeholder.error(error_msg)
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    for student in STUDENTS:
+        st.session_state.attendance[student] = st.selectbox(
+            f"{student}",
+            ["출석", "지각", "결석"],
+            index=["출석", "지각", "결석"].index(
+                st.session_state.attendance[student]
+            ),
+            key=student
+        )
+
+# ---------------------------
+# 데이터 생성
+# ---------------------------
+df = pd.DataFrame({
+    "학생명": list(st.session_state.attendance.keys()),
+    "상태": list(st.session_state.attendance.values())
+})
+
+present_count = len(df[df["상태"] == "출석"])
+late_count = len(df[df["상태"] == "지각"])
+absent_count = len(df[df["상태"] == "결석"])
+
+attendance_rate = (
+    (present_count + late_count) / len(df) * 100
+)
+
+# ---------------------------
+# 통계
+# ---------------------------
+with col2:
+    st.subheader("📊 오늘의 통계")
+
+    st.metric("출석", present_count)
+    st.metric("지각", late_count)
+    st.metric("결석", absent_count)
+    st.metric("출석률", f"{attendance_rate:.1f}%")
+
+# ---------------------------
+# 알림
+# ---------------------------
+absent_students = df[df["상태"] == "결석"]["학생명"].tolist()
+
+st.divider()
+
+if absent_students:
+    st.error(
+        f"🚨 담임교사 알림: 결석 학생 {len(absent_students)}명 발생"
+    )
+
+    st.warning(
+        "결석 학생: " + ", ".join(absent_students)
+    )
+
+    with st.sidebar:
+        st.error("결석 학생 발생")
+        for student in absent_students:
+            st.write(f"• {student}")
+
+else:
+    st.success("✅ 모든 학생 출결 확인 완료")
+
+# ---------------------------
+# 출결 현황 조회
+# ---------------------------
+st.subheader("📋 출결 현황")
+
+def highlight_status(row):
+    color = {
+        "출석": "#d4edda",
+        "지각": "#fff3cd",
+        "결석": "#f8d7da"
+    }.get(row["상태"], "white")
+
+    return [f"background-color: {color}"] * len(row)
+
+styled_df = df.style.apply(highlight_status, axis=1)
+
+st.dataframe(
+    styled_df,
+    use_container_width=True,
+    hide_index=True
+)
+
+# ---------------------------
+# CSV 다운로드
+# ---------------------------
+csv = df.to_csv(index=False).encode("utf-8-sig")
+
+st.download_button(
+    "📥 출결 CSV 다운로드",
+    csv,
+    file_name="attendance.csv",
+    mime="text/csv"
+)
+
+# ---------------------------
+# 하단 안내
+# ---------------------------
+st.divider()
+
+st.info(
+    "아침 조례 시간에 학생 출결을 입력하고 "
+    "결석 학생을 즉시 확인할 수 있습니다."
+)
